@@ -1,11 +1,11 @@
 ﻿@model LoginViewModel
-
 <h1>Login</h1>
-<a asp-controller="Home" asp-action="Index">Home</a>
+<p>
+  <a asp-controller="Home" asp-action="Index">[Home]</a>
+</p>
 
 <form asp-controller="Admin" asp-action="Login" method="post">
   <input hidden asp-for="ReturnUrl"/>
-
   <div>
     <label>UserName</label>
     <input asp-for="UserName"/>
@@ -18,6 +18,6 @@
   </div>
 
   <p>
-    <button type="submit">Login</button>
+    <button type="submit">Log In</button>
   </p>
 </form>

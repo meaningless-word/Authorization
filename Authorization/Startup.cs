@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using System.Security.Claims;
 
 namespace Authorization
 {
@@ -13,8 +14,20 @@ namespace Authorization
 				.AddCookie("Cookie", config =>
 				{
 					config.LoginPath = "/Admin/Login";
+					config.AccessDeniedPath = "/Home/AccessDenied";
+
 				});
-			services.AddAuthorization();
+			services.AddAuthorization(options =>
+			{
+				options.AddPolicy("Administrator", builder =>
+				{
+					builder.RequireClaim(ClaimTypes.Role, "Administrator");
+				});
+				options.AddPolicy("Manager", builder =>
+				{
+					builder.RequireAssertion(x => x.User.HasClaim(ClaimTypes.Role, "Manager") || x.User.HasClaim(ClaimTypes.Role, "Administrator"));
+				});
+			});
 
 			services.AddControllersWithViews();
 		}

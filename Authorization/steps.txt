@@ -1,185 +1,118 @@
-﻿1. Создаём пустой ASP.NET Core проект
+﻿1. Создаём пустой ASP.NET Core проект и копируем в него функциональность из Aothorization.Basics
+2. Определим, какая информация о пользователе содержится в контексте, когда пользователь авторизован
+выведем её на странице Home. для этого в HomrController.cs во вьюшке Index:
+		public IActionResult Index()
+		{
+			ViewBag.Name = User.Identity.Name;
+			ViewBag.IsAuthenticated = User.Identity.IsAuthenticated;
+			return View();
+		}
+и в Index.cshtml
+<p>
+  IsAuthenticates: @ViewBag.IsAuthenticated
+</p>
 
-2. в Startup.cs:
-в методе Configure это
-			app.UseEndpoints(endpoints =>
+<p>
+  Name: @ViewBag.Name
+</p>
+3. запускаем и видим, что статус работает, а имя не отображается
+4. для доступа к имени необходимо скорректировать клаймы в методе Login
+			var claims = new List<Claim>
 			{
-				endpoints.MapGet("/", async context =>
+				new Claim(ClaimTypes.Name, model.UserName)
+			};
+при создании листа для хранения клаймов указываем, какой тип клайма хранить и чем его заполнять
+5. чтобы эффективно работать с ролями, создадим два метода, в которые будет разрешен доступ для разных типов ролей
+в AdminController.cs добавим новые методы, отмеченные атрибутами с именем ролей:
+		[Authorize(Roles="Administrator")]
+		public IActionResult Administrator()
+		{
+			return View();
+		}
+
+		[Authorize(Roles = "Manager")]
+		public IActionResult Manager()
+		{
+			return View();
+		}
+к ним создадим соответствующие вьюшки на основе Index.cshtml
+6. переходим в Startup.cs метод ConfigureServices. будем донастраивать строку srvices.AddAuthorization();
+будем конфигурировать options - мы должны добавить policy
+небольшое отступление...
+	модель ролей возникла ещё в самом начале mvc
+	ещё в asp.net page web form ролевая модель основывалась на 5-6 таблицах... и она уже себя изжила
+	хотя asp.net core продолжает поддержку всех этих ролевых моделей хотя это уже легаси код 
+	и куда более оптимально использовать клаймы - они более гибкие, хотя их сложнее настраивать
+... отступление закончилось
+policy - это один из способов управленя клаймами
+добавим код
+			services.AddAuthorization(options => 
+			{
+				options.AddPolicy("Administrator", builder =>
 				{
-					await context.Response.WriteAsync("Hello World!");
+					builder.RequireClaim(ClaimTypes.Role, "Administrator");
+				});
+				options.AddPolicy("Manager", builder =>
+				{
+					builder.RequireClaim(ClaimTypes.Role, "Manager");
 				});
 			});
-заменить на
-			app.UseEndpoints(endpoints =>
-			{
-				endpoints.MapDefaultControllerRoute();
-			});
-в методе ConfigureServices добавить
-			services.AddControllersWithViews();
-чтобы использовать контроллеры с вьюшками (полноценный mvc)
-3. в launchSettings.json
-удаляется блок IIS
-  "iisSettings": {
-    "windowsAuthentication": false,
-    "anonymousAuthentication": true,
-    "iisExpress": {
-      "applicationUrl": "http://localhost:16666",
-      "sslPort": 44324
-    }
-  },
-мз блока profiles удаляется
-    "IIS Express": {
-      "commandName": "IISExpress",
-      "launchBrowser": true,
-      "environmentVariables": {
-        "ASPNETCORE_ENVIRONMENT": "Development"
-      }
-    },
-а в оставшийся блок добавляется указание на стартовый контроллер
-      "launchUrl": "home/index",
-4. добавить папку Controllers, а в ней создать контроллеры HomeControllers.cs и AdminController.cs
-5. добавить папку Views, а в ней папки Home и Admin, в которых создать Index.cshtml
-6. в файлы index добавим пока просто название страницы <h1>Home</h1> и <h1>Admin</h1> соотвветственно
-7. теперь, если запустить приложение, оно стартует в браузере со страницы home по адресу https://localhost:5001/home/index, а исправив адрес на https://localhost:5001/admin/index 
-отображается страница админ
-8. сделаем переходы между страницами более удобныи
-для этого в папку Views добавить новый элемент "Импорт представлений Razor" (_ViewImports.cshtml)
-а нём добавить строку 
-@addTagHelper *, Microsoft.AspNetCore.Mvc.TagHelpers
-чтобы во вьюхах работать с asp-тегами
-и теперь в файл Index.cshtml home-контроллера добавить сроку
-<a asp-controller="Admin" asp-action="Index">Admin</a>
-и аналогичную в admin-контроллер
-9. проверка работоспособности... работает
-10. Сейчас у нас в системе два контроллера Home и Admin, при этом доступ в админ мы хотим защитить, т.е. вход только по паролю
-В asp.net core существует атрибут, который называется [Authorize]
-работает он так: если его установить над классом контроллера, то тогда будут защищены все методы этого контроллера, 
-а если атрибут установить над конкретным контроллером, то доступ будет закрыт только к нему
-11. запустим проект и посмотрим, что произойдёт при переходе на страницу Admin
-в результате получим страницу с ошибкой, где написано, что для работы нужно подключить авторизацию, утентификацию...
-12. переходим к Startup.cs и в методе ConfigureServices добавляем:
-			services.AddAuthentication();
-			services.AddAuthorization();
-перед строкой AddControllersWithViews
-13. так же добавляем пару вызовов в методе Configure
-			app.UseAuthentication();
-			app.UseAuthorization();
-главное, чтобы они размещались между роутингом и маппингом
-14. запускаем снова и видим ошибку, что не указана схема аутентификации.
-схем вообще несколько: одна с использованием cookies, вторая с Bearer, а можно даже свою замутить
-но в данном примере будет использована схема cookies, как самая простая для этого дополним строку
-			services.AddAuthentication();
-в методе ConfigureServices, указав схему
+7. прежде, чем проверить как это работает, во вьюшку Home/Index добавим ссылки
+<a asp-controller="Admin" asp-action="Administrator">Administrator</a>
+<a asp-controller="Admin" asp-action="Manager">Manager</a>
+8. после запуска ссылки не работают, ссылаются на несуществующую страницу Access Denied
+9. добавим переадресацию на несуществующую страницу:
+в Startup.cs в методе ConfigureServices добавим
 			services.AddAuthentication("Cookie")
 				.AddCookie("Cookie", config =>
 				{
 					config.LoginPath = "/Admin/Login";
+					config.AccessDeniedPath = "/Home/AccessDenied";
+					
 				});
-а заодно с ней изменить поведение по умолчанию, указав ссылку на контроллер, который должен отработать в случае неавторизованного пользователя
-15. запускаем. при переходе на Admin происзодит редиерк на несуществующую пока страницу https://localhost:5001/Admin/Login?ReturnUrl=%2FAdmin
-создадим её
-16. в админ-контроллер добавим метод
-		public IActionResult Login(string returnUrl)
-		{
-			return View();
-		}
-но, поскольку весь класс контроллера закрыт атрибутом [Authorize], доступ к методу Login закрыт ипри переходе можно попасть в рекрсию
-можно, конечно, тогда ставить [Authorize] у каждого метода, но можно сделать по-другому
-чтобы открыть какой-либо метод для общего доступа, необходимо над его описание поставить атрибут [AllowAnonymous]
-в параметр будет передан URL перехода после ввода логина
-17. далее, необходимо добавить новую вьюшку Login в папку Viewws/Admin с содержимым
-<h1>Login</h1>
-<a asp-controller="Home" asp-action="Index">Home</a>
-
-<form asp-controller="Admin" asp-action="Login" method="post">
-</form>
-
-18. как видно, нам необходимо доавить ещё один метод Login с атрибутом post в контроллер
-соответственно, в AdminController появится
-		[HttpPost]
-		[AllowAnonymous]
-		public IActionResult Login(LoginViewModel model)
-		{
-			return View();
-		}
-параметром в котором служит модель, куда будут переданы учетные данные для входа с формы
-19. поскольку класса модели у нас ешё нет, создадим
-namespace Autorization.Basics.Models
-{
-	public class LoginViewModel
-	{
-		public string UserName { get; set; }
-		public string Password { get; set; }
-		public string ReturnUrl { get; set; }
-	}
-}
-для красоты запихав в папку Models
-20. а пока дорисуем, что у нас должно быть форме
-первой строкой файла необходимо указать модель, в которую будут помещены данные
-@model LoginViewModel
-чтобы модель была видна, необходимо указать сылку на класс. делается это в файле _ViewImports.cshtml строкой
-@using Autorization.Basics.Models
-
-затем внутрь формы помещаются контролы для создания интерфейса
-
-  <input hidden asp-for="ReturnUrl"/>
-
-  <div>
-    <label>UserName</label>
-    <input asp-for="UserName"/>
-  </div>
-  <div>
-    <label>Password</label>
-    <input asp-for="Password" />
-  </div>
-
-  <p>
-    <button type="submit">Login</button>
-  </p>
-
-21. поставим точку останова в методе Login, имеющем атрибут [HttpPost]
-запустим.
-вводим в форму произвольные данные, жмём кнопку Login и оказываемся в точке останова
-обращаем внимание, что model в параметре заполнена указанными данными
-22. для того, чтобы форма не срабатывала на пустых значениях, необходимо указать атрибут [Required] на кождом свойстве класса модели
-а в форме поля дополнить валидаторами
-    <span asp-validation-for="UserName"></span>
-для имени и
-    <span asp-validation-for="Password"></span>
-для пароля
-23. проверям - видим надпись "The UserName field is required." при попытке подсунуть пустое значение
-24. теперь необходимо учинить проверку полученной модели
-в методе Login, имеющем атрибут [HttpPost] проверка невалидности модели 
-			if (!ModelState.IsValid)
-			{
-				return View(model);
-			}
-с возвратом её обратно во вьюшку в случае невалидности, а затем блок проверки 
+10. теперь эту вьюшку необходимо создать
+11. заодно и соответствующий метод в контроллере
+12. при запуске переход по ссылкам Администратор и Менеджер приводят на страницу AccessDenied потому что пока мы не имеем информации о пользователе и его ролях
+13. добавим роли. в методе Login класса AdministratorController к коллекции клаймов добавляется клайм типа "роль" с наименованием Manager:
+14. запускаем. заходя на страницу Manager попадаем на страницу запроса логина\пароля. регистрируемся. и теперь легко переходим на страницу Home, Admin и Manager, 
+а на страницу Administrator - Access Denied
+15. поскольку в коде контроллера использовались атрибуты со словом Roles: [Authorize(Roles="Administrator")] это старый принцип. то для того, чтобы у пользователя
+была возможность заходить и туда и туда, необходимо указать два клайма, чтобы определить ккие у пользователя роли:
 			var claims = new List<Claim>
 			{
-				new Claim("Demo", "Value")
+				new Claim(ClaimTypes.Name, model.UserName),
+				new Claim(ClaimTypes.Role, "Manager"),
+				new Claim(ClaimTypes.Role, "Administrator")
 			};
-			var claimIdentity = new ClaimsIdentity(claims, "Cookie");
-			var claimPrincipal = new ClaimsPrincipal(claimIdentity);
-			await HttpContext.SignInAsync("Cookie", claimPrincipal);
-
-			return Redirect(model.ReturnUrl);
-25. запуск
-включим в браузере (Chromt) инструменты разработчика (Ctrl + Shift + I)
-на вкладке Applications развернём структуру Storage/Cookies
-переходим на страницу Login, вводим данные
-и видим, как появилась новая позиция .AspNetCore.Cookie
-после этого свободно можно перемещаться между страницами Home - Admin
-но стоит удалить эту куку, приложение снова запросит ввести логин/пароль
-26. реализуем LogOut
-во вьюшке Admin добавим ссылку с выходом
-<a asp-controller="Admin" asp-action="LogOff">Log Off</a>
-27. добавить соответствующий метод в контроллере
-		public IActionResult LogOff()
-		{
-			HttpContext.SignOutAsync("Cookie");
-			return Redirect("/Home/Index");
-		}
-28. запуск
-теперь, после перехода по ссылке Log Off снова запрашвается парль при входе на страницу Admin
-это благодаря вызову метода HttpContext.SignOutAsync("Cookie");
+не очень гибко, так как, если в приложении будет определено 15 ролей, тогда для супер пользователя они должны быть перечислены все
+и здесь на помощь приходит новый принцип авторизации на основе клаймов и полиси
+16. меняем атрибуты [Authorize(Roles="Administrator")] на [Authorize(Policy="Administrator")] и соответственно для менеджера
+[Authorize(Roles = "Manager")] на [Authorize(Policy = "Manager")]
+и если раньше роли брались из перечня клаймов в логине
+			var claims = new List<Claim>
+			{
+				new Claim(ClaimTypes.Name, model.UserName),
+				new Claim(ClaimTypes.Role, "Manager"),
+				new Claim(ClaimTypes.Role, "Administrator")
+			};
+то политики берутся из Startup метода ConfigureServices
+			services.AddAuthorization(options => 
+			{
+				options.AddPolicy("Administrator", builder =>
+				{
+					builder.RequireClaim(ClaimTypes.Role, "Administrator");
+				});
+				options.AddPolicy("Manager", builder =>
+				{
+					builder.RequireClaim(ClaimTypes.Role, "Manager");
+				});
+			});
+т.е. указана политика, а внутри можно указать необходимые нам роли
+на примере роли менеджера:
+				options.AddPolicy("Manager", builder =>
+				{
+					builder.RequireAssertion(x => x.User.HasClaim(ClaimTypes.Role, "Manager") || x.User.HasClaim(ClaimTypes.Role, "Administrator"))
+				});
+где указывается, что политике Manager доступны роли менеджера и администратора
+помимо этого в выражении можно определять не только перечень ролей, но и много других дополнительных обработоа исходя из переданных данных в модели User
+17. запуск показывает, что залогинившись у нас есть доступ и на страницу менеджера, и на страницу администратора
