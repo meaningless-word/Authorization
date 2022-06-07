@@ -1,9 +1,8 @@
-﻿using Authorization.Models;
-using Microsoft.AspNetCore.Authentication;
+﻿using Authorization.Entities;
+using Authorization.Models;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
-using System.Collections.Generic;
-using System.Security.Claims;
 using System.Threading.Tasks;
 
 namespace Authorization.Controllers
@@ -11,6 +10,15 @@ namespace Authorization.Controllers
 	[Authorize]
 	public class AdminController : Controller
 	{
+		private readonly UserManager<ApplicationUser> _userManager;
+		private readonly SignInManager<ApplicationUser> _signInManager;
+
+		public AdminController(UserManager<ApplicationUser> userManager, SignInManager<ApplicationUser> signInManager)
+		{
+			_userManager = userManager;
+			_signInManager = signInManager;
+		}
+
 		public IActionResult Index()
 		{
 			return View();
@@ -43,21 +51,39 @@ namespace Authorization.Controllers
 				return View(model);
 			}
 
-			var claims = new List<Claim>
+			//var user = await _context.Users.SingleOrDefaultAsync(x => x.UserName == model.UserName && x.Password == model.Password);
+			var user = await _userManager.FindByNameAsync(model.UserName);
+			if (user == null)
 			{
-				new Claim(ClaimTypes.Name, model.UserName),
-				new Claim(ClaimTypes.Role, "Administrator")
-			};
-			var claimIdentity = new ClaimsIdentity(claims, "Cookie");
-			var claimPrincipal = new ClaimsPrincipal(claimIdentity);
-			await HttpContext.SignInAsync("Cookie", claimPrincipal);
+				//ModelState.AddModelError("UserName", "User Not Found");
+				ModelState.AddModelError("", "User Not Found");
+				return View(model);
+			}
 
-			return Redirect(model.ReturnUrl);
+			//var claims = new List<Claim>
+			//{
+			//	new Claim(ClaimTypes.Name, model.UserName),
+			//	new Claim(ClaimTypes.Role, "Administrator")
+			//};
+			//var claimIdentity = new ClaimsIdentity(claims, "Cookie");
+			//var claimPrincipal = new ClaimsPrincipal(claimIdentity);
+			//await HttpContext.SignInAsync("Cookie", claimPrincipal);
+
+			var result = await _signInManager.PasswordSignInAsync(user, model.Password, false, false);
+
+			if (result.Succeeded)
+			{
+				return Redirect(model.ReturnUrl);
+			}
+
+			return View(model);
+
 		}
 
-		public IActionResult LogOff()
+		public async Task<IActionResult> LogOffAsync()
 		{
-			HttpContext.SignOutAsync("Cookie");
+			//HttpContext.SignOutAsync("Cookie");
+			await _signInManager.SignOutAsync();
 			return Redirect("/Home/Index");
 		}
 	}

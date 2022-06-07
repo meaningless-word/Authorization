@@ -1,118 +1,174 @@
-﻿1. Создаём пустой ASP.NET Core проект и копируем в него функциональность из Aothorization.Basics
-2. Определим, какая информация о пользователе содержится в контексте, когда пользователь авторизован
-выведем её на странице Home. для этого в HomrController.cs во вьюшке Index:
-		public IActionResult Index()
-		{
-			ViewBag.Name = User.Identity.Name;
-			ViewBag.IsAuthenticated = User.Identity.IsAuthenticated;
-			return View();
-		}
-и в Index.cshtml
-<p>
-  IsAuthenticates: @ViewBag.IsAuthenticated
-</p>
-
-<p>
-  Name: @ViewBag.Name
-</p>
-3. запускаем и видим, что статус работает, а имя не отображается
-4. для доступа к имени необходимо скорректировать клаймы в методе Login
-			var claims = new List<Claim>
+﻿1. Создаём пустой ASP.NET Core проект и копируем в него функциональность из Authorization.Roles
+2. Для того, чтобы сохранить пользователя в базе данных, нужно этого пользователя создать, а для этого нам потребуется класс
+Создадим папки Data и Entities
+3. В папке Entities создадим нашего пользователя ApplicationUser
+4. В папке Data создадим ApplicationDbContext
+5. Утанавливаем NuGet пакеты Microsoft.EntityFrameworkCore и Microsoft.EntityFrameworkCore.InMemory чтобы не создавать реальных баз данных
+6. Сконфигурируем базу данных в Startup.cs
+			services.AddDbContext<ApplicationDbContext>(config =>
 			{
-				new Claim(ClaimTypes.Name, model.UserName)
+				config.UseInMemoryDatabase("MEMORY");
+			}); 
+7. Попробуем залогиниться. Для этого в методе Login AdminController'а получить данные пользователя из бызы данных
+8. Пробросим в контроллер контекст базы данных через конструктор
+		private ApplicationDbContext _context;
+		public AdminController(ApplicationDbContext context)
+		{
+			_context = context;
+		}
+9. в методе Login с атрибутом HttpPost запросим в базе пользователя с указанными именем и паролем
+если такого пользователя не окзалось, вернёт во вьюшку модель с ошибкой
+			var user = await _context.Users.SingleOrDefaultAsync(x => x.UserName == model.UserName && x.Password == model.Password);
+			if (user == null)
+			{
+				ModelState.AddModelError("UserName", "User Not Found");
+				return View(model);
+			}
+10. спозиционируем сообщение об ошибке во вьюхе
+  <div asp-validation-summary="All">
+  </div>
+убрав при этом имя поля из передачи ошибки через ModelState
+11. теперь необходимо заполнить базу данных, чтоб было с чем сравнивать вводимые при логине данные
+Для этой цели лучше всего подходит Program.cs, поскольку база создаётся динамически каждый раз
+		public static void Main(string[] args)
+		{
+			CreateHostBuilder(args).Build().Run();
+		}
+изменим на
+		public static void Main(string[] args)
+		{
+			var host = CreateHostBuilder(args).Build();
+			using (var scope = host.Services.CreateScope())
+			{
+				DatabaseInitializer.Init(scope.ServiceProvider);
+			}
+			host.Run();
+		}
+12. Создадим статичный класс DatabaseInitializer, в методе Init которого наполним базу данных пользователями
+	public static class DatabaseInitializer
+	{
+		internal static void Init(IServiceProvider scopeServiceProvider)
+		{
+			var context = scopeServiceProvider.GetService<ApplicationDbContext>();
+
+			var user = new ApplicationUser()
+			{
+				UserName = "User",
+				Password = "123qwe",
+				FirstName = "FirstName",
+				LastName = "LastName"
 			};
-при создании листа для хранения клаймов указываем, какой тип клайма хранить и чем его заполнять
-5. чтобы эффективно работать с ролями, создадим два метода, в которые будет разрешен доступ для разных типов ролей
-в AdminController.cs добавим новые методы, отмеченные атрибутами с именем ролей:
-		[Authorize(Roles="Administrator")]
-		public IActionResult Administrator()
-		{
-			return View();
-		}
 
-		[Authorize(Roles = "Manager")]
-		public IActionResult Manager()
-		{
-			return View();
+
+			context.Users.Add(user);
+			context.SaveChanges();
 		}
-к ним создадим соответствующие вьюшки на основе Index.cshtml
-6. переходим в Startup.cs метод ConfigureServices. будем донастраивать строку srvices.AddAuthorization();
-будем конфигурировать options - мы должны добавить policy
-небольшое отступление...
-	модель ролей возникла ещё в самом начале mvc
-	ещё в asp.net page web form ролевая модель основывалась на 5-6 таблицах... и она уже себя изжила
-	хотя asp.net core продолжает поддержку всех этих ролевых моделей хотя это уже легаси код 
-	и куда более оптимально использовать клаймы - они более гибкие, хотя их сложнее настраивать
-... отступление закончилось
-policy - это один из способов управленя клаймами
-добавим код
-			services.AddAuthorization(options => 
+	}
+13. Но это только начало пути, поскольку необходимо создать таблицу ролей, таблицу совмещения ролей на пользователей, пермишены... к тому же нельзя хранить пароль в базе данных
+набор требований немаленький...
+И всё это уже реализовано в MicrosoftIdentity, поэтому можно воспользоваться
+14. Установим пакет Microsoft.AspNetCore.Identity и Microsoft.AspNetCore.Identity.EntityFrameworkCore
+15. Чтобы воспользоваться им изменим кое-что с самого начала:
+16. в ApplicationDbContext унаследовать класс от IdentityDbContext (вместо просто DbContext), который унаследован от DbContext и поверх надстроены 
+пользователь, клаймы, логины, токены, роли...
+17. Но и класс, определяющий пользователя теперь тоже не годится. ПОльзователь должен быть унаследован от IdentityUser...
+но Microsoft почему то использует в качестве айдишников не guid, а string. Поэтому наследоваться будем от IdentityUser<Guid>
+теперь замечаем, что некоторые сойства уже присутствуют в родительском классе, а пароль так вообще не нужен, поэтому удалим лишние поля
+18. Вернёмся снова к ApplicationDbContext. из-за переопределния Id у IdentityUser'а со string на Guid, необходимо указать тип и в параметрах IdentityDbContext:
+public class ApplicationDbContext : IdentityDbContext<ApplicationUser, ApplicationRole, Guid>
+19. Определим класс ApplicationRole, унаследованный от IdentityRole<Guid>, указав тип-параметр для айдишника 
+20. Теперь, чтобы всё это заработало, в классе Startup необходимо доконфигурировать ApplicationDbContext
+			services.AddDbContext<ApplicationDbContext>(config =>
 			{
-				options.AddPolicy("Administrator", builder =>
-				{
-					builder.RequireClaim(ClaimTypes.Role, "Administrator");
-				});
-				options.AddPolicy("Manager", builder =>
-				{
-					builder.RequireClaim(ClaimTypes.Role, "Manager");
-				});
-			});
-7. прежде, чем проверить как это работает, во вьюшку Home/Index добавим ссылки
-<a asp-controller="Admin" asp-action="Administrator">Administrator</a>
-<a asp-controller="Admin" asp-action="Manager">Manager</a>
-8. после запуска ссылки не работают, ссылаются на несуществующую страницу Access Denied
-9. добавим переадресацию на несуществующую страницу:
-в Startup.cs в методе ConfigureServices добавим
+				config.UseInMemoryDatabase("MEMORY");
+			})
+				.AddIdentity<ApplicationUser, ApplicationRole>()
+				.AddEntityFrameworkStores<ApplicationDbContext>(); 
+21. Из инициализатора базы убираем определение пароля
+22. В методе Login убираем сверку пользователя с одноименным из базы, а будем использовать функционал, предоставленый пакетом Identity
+сначала меняем конструктор с этого
+		private ApplicationDbContext _context;
+
+		public AdminController(ApplicationDbContext context)
+		{
+			_context = context;
+		}
+на этот
+		private readonly UserManager<ApplicationUser> _userManager;
+
+		public AdminController(UserManager<ApplicationUser> userManager)
+		{
+			_userManager = userManager;
+		}
+23. Теперь для поиска пользователя в базе воспользуемся UserManager'ом
+var user = await _userManager.FindByNameAsync(model.UserName);
+проверка null'евоти пользователя с возвратом ошибки остаётся
+24. После опознания пользователя нужно авторизовать, для этого снова дополним конструктор пробросом менеджера 
+		private readonly UserManager<ApplicationUser> _userManager;
+		private readonly SignInManager<ApplicationUser> _signInManager;
+
+		public AdminController(UserManager<ApplicationUser> userManager, SignInManager<ApplicationUser> signInManager)
+		{
+			_userManager = userManager;
+			_signInManager = signInManager;
+		}
+25. Снова правки в Startup.cs
+при конфигурировании DbContext'а и подключении Identity идентификация "Cookie"
 			services.AddAuthentication("Cookie")
 				.AddCookie("Cookie", config =>
 				{
 					config.LoginPath = "/Admin/Login";
 					config.AccessDeniedPath = "/Home/AccessDenied";
-					
 				});
-10. теперь эту вьюшку необходимо создать
-11. заодно и соответствующий метод в контроллере
-12. при запуске переход по ссылкам Администратор и Менеджер приводят на страницу AccessDenied потому что пока мы не имеем информации о пользователе и его ролях
-13. добавим роли. в методе Login класса AdministratorController к коллекции клаймов добавляется клайм типа "роль" с наименованием Manager:
-14. запускаем. заходя на страницу Manager попадаем на страницу запроса логина\пароля. регистрируемся. и теперь легко переходим на страницу Home, Admin и Manager, 
-а на страницу Administrator - Access Denied
-15. поскольку в коде контроллера использовались атрибуты со словом Roles: [Authorize(Roles="Administrator")] это старый принцип. то для того, чтобы у пользователя
-была возможность заходить и туда и туда, необходимо указать два клайма, чтобы определить ккие у пользователя роли:
-			var claims = new List<Claim>
+перестаёт работать, она больше не нужна
+и теперь редиректы неопределы и их нужно добавить вызовом другого метода
+			services.ConfigureApplicationCookie(config =>
 			{
-				new Claim(ClaimTypes.Name, model.UserName),
-				new Claim(ClaimTypes.Role, "Manager"),
-				new Claim(ClaimTypes.Role, "Administrator")
-			};
-не очень гибко, так как, если в приложении будет определено 15 ролей, тогда для супер пользователя они должны быть перечислены все
-и здесь на помощь приходит новый принцип авторизации на основе клаймов и полиси
-16. меняем атрибуты [Authorize(Roles="Administrator")] на [Authorize(Policy="Administrator")] и соответственно для менеджера
-[Authorize(Roles = "Manager")] на [Authorize(Policy = "Manager")]
-и если раньше роли брались из перечня клаймов в логине
-			var claims = new List<Claim>
-			{
-				new Claim(ClaimTypes.Name, model.UserName),
-				new Claim(ClaimTypes.Role, "Manager"),
-				new Claim(ClaimTypes.Role, "Administrator")
-			};
-то политики берутся из Startup метода ConfigureServices
-			services.AddAuthorization(options => 
-			{
-				options.AddPolicy("Administrator", builder =>
-				{
-					builder.RequireClaim(ClaimTypes.Role, "Administrator");
-				});
-				options.AddPolicy("Manager", builder =>
-				{
-					builder.RequireClaim(ClaimTypes.Role, "Manager");
-				});
+				config.LogoutPath = "/Admin/Login";
+				config.AccessDeniedPath = "/Home/AccessDenied";
 			});
-т.е. указана политика, а внутри можно указать необходимые нам роли
-на примере роли менеджера:
-				options.AddPolicy("Manager", builder =>
+26. переопределение пользователя в инициализаторе базы
+вместо прямой записи в базу через контекст пользователя нужно добавлять через UserManager, который получаем через ScopeServiceProvaider
+			var userManager = scopeServiceProvider.GetService<UserManager<ApplicationUser>>();
+далее созданного пользователя необходимо передать в метод CreateAsync. И поскольку метод у нас аснхронный, а класс статический, в конце добавить .GetAwaiter().GetResult();
+			var result = userManager.CreateAsync(user, "123qwe").GetAwaiter().GetResult();
+полученный результат нужно обработать
+			if (result.Succeeded)
+			{
+
+			}
+но дополнительно нужно сконфигурировать политику паролей, иначе такой простой пароль отбреется. 
+27. Для конфигурации паролей вренемся в ConfigureServices Startup'а
+			services.AddDbContext<ApplicationDbContext>(config =>
+			{
+				config.UseInMemoryDatabase("MEMORY");
+			})
+				.AddIdentity<ApplicationUser, ApplicationRole>(config =>
 				{
-					builder.RequireAssertion(x => x.User.HasClaim(ClaimTypes.Role, "Manager") || x.User.HasClaim(ClaimTypes.Role, "Administrator"))
-				});
-где указывается, что политике Manager доступны роли менеджера и администратора
-помимо этого в выражении можно определять не только перечень ролей, но и много других дополнительных обработоа исходя из переданных данных в модели User
-17. запуск показывает, что залогинившись у нас есть доступ и на страницу менеджера, и на страницу администратора
+					config.Password.RequireDigit = false;
+					config.Password.RequireLowercase = false;
+					config.Password.RequireNonAlphanumeric = false;
+					config.Password.RequireUppercase = false;
+					config.Password.RequiredLength = 6;
+				})
+				.AddEntityFrameworkStores<ApplicationDbContext>();
+28. Запускаем проверяем. Вход с пользователем User:123qwe работает... но на страницы не заходит
+29. Добавим клаймы
+Это проделывается в инициализаторе базы как раз в блоке проверки удачного создания пользователя UserManager'ом
+			if (result.Succeeded)
+			{
+				userManager.AddClaimAsync(user, new Claim(ClaimTypes.Role, "Administrator")).GetAwaiter().GetResult();
+			}
+30. Возобновим работу Log Off
+Перейдём в AdminController и изменим в методе LogOff следующее:
+		public IActionResult LogOff()
+		{
+			HttpContext.SignOutAsync("Cookie");
+			return Redirect("/Home/Index");
+		}
+на
+		public async Task<IActionResult> LogOffAsync()
+		{
+			await _signInManager.SignOutAsync();
+			return Redirect("/Home/Index");
+		}
